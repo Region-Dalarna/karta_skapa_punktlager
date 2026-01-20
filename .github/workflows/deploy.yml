@@ -2,7 +2,7 @@ name: Deploy karta_skapa_punktlager
 
 on:
   push:
-    branches: [ main ]
+    branches: [ produktion ]
 
 jobs:
   deploy:
