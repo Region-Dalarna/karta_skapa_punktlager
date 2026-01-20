@@ -1,0 +1,18 @@
+name: Deploy karta_skapa_punktlager
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: [ self-hosted, shiny ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Deploy app using server-side script
+        run: |
+          TEMP_DIR="${GITHUB_WORKSPACE}/app"
+          /usr/local/bin/shiny_deploy.sh karta_skapa_punktlager "$TEMP_DIR"
