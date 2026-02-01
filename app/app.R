@@ -115,6 +115,18 @@ ui <- fluidPage(
       downloadButton("dl_gpkg", paste("Ladda ner filen"), width = "100%"),
       br(), br(), br(), br(),
       actionButton("clear", "Ta bort alla punkter", class = "btn-danger"),
+
+      br(), br(),
+      checkboxInput(
+        "show_kommun",
+        label = "Visa kommungränser",
+        value = FALSE
+      ),
+      checkboxInput(
+        "show_lan",
+        label = "Visa länsgränser",
+        value = FALSE
+      )
     ),
     column(
       width = 3,
@@ -124,10 +136,47 @@ ui <- fluidPage(
   )
 )
 
+source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R", encoding = "utf-8", echo = FALSE)
+
+kommuner_sf <- NULL
+lan_sf      <- NULL
+
+# con <- shiny_uppkoppling_las("geodata")                      # skapa anslutning
+#
+# kommuner_sf <- tbl(con, I("karta.kommun_scb")) %>%
+#   collect() %>%
+#   df_till_sf() %>%
+#   st_transform(4326)
+#
+# lan_sf <- tbl(con, I("karta.lan_scb")) %>%
+#   collect() %>%
+#   df_till_sf() %>%
+#   st_transform(4326)
+#
+# DBI::dbDisconnect(con)                                       # stäng anslutningen
+
 server <- function(input, output, session) {
 
   pts <- reactiveVal(tibble(id = integer(), namn = character(), lng = numeric(), lat = numeric()))
   id_counter <- reactiveVal(0)
+
+  # Sen laddning av lan och kommuner
+  session$onFlushed(function() {
+    con <- shiny_uppkoppling_las("geodata")                      # skapa anslutning
+
+    kommuner_sf <<- tbl(con, I("karta.kommun_scb")) %>%
+      collect() %>%
+      df_till_sf() %>%
+      st_transform(4326)
+
+    lan_sf <<- tbl(con, I("karta.lan_scb")) %>%
+      collect() %>%
+      df_till_sf() %>%
+      st_transform(4326)
+
+    DBI::dbDisconnect(con)
+  }, once = TRUE)
+
 
   # Hämta tillgängliga drivrutiner (endast skrivbara vektorformat)
   available_formats <- reactive({
@@ -239,6 +288,42 @@ server <- function(input, output, session) {
       });
     }
   ")
+  })
+
+  observe({
+    proxy <- leafletProxy("map")
+
+    # Kommungränser – tunnare linje
+    if (isTRUE(input$show_kommun)) {
+      proxy <- proxy %>%
+        clearGroup("kommuner") %>%
+        addPolygons(
+          data        = kommuner_sf,
+          color       = "#444444",  # mörkgrå linje
+          weight      = 1,          # tunnare än län
+          fill        = FALSE,
+          fillOpacity = 0,          # ingen fyllning
+          group       = "kommuner"
+        )
+    } else {
+      proxy <- proxy %>% clearGroup("kommuner")
+    }
+
+    # Länsgränser – lite tjockare linje
+    if (isTRUE(input$show_lan)) {
+      proxy <- proxy %>%
+        clearGroup("lan") %>%
+        addPolygons(
+          data        = lan_sf,
+          color       = "#000000",  # svart linje
+          weight      = 2.5,        # tjockare än kommun
+          fill        = FALSE,
+          fillOpacity = 0,
+          group       = "lan"
+        )
+    } else {
+      proxy <- proxy %>% clearGroup("lan")
+    }
   })
 
   output$format_ui <- renderUI({
