@@ -138,22 +138,8 @@ ui <- fluidPage(
 
 source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R", encoding = "utf-8", echo = FALSE)
 
-kommuner_sf <- NULL
+kommuner_sf <- NULL                 # ges inget värde här, utan laddas när sidan har renderats klart
 lan_sf      <- NULL
-
-# con <- shiny_uppkoppling_las("geodata")                      # skapa anslutning
-#
-# kommuner_sf <- tbl(con, I("karta.kommun_scb")) %>%
-#   collect() %>%
-#   df_till_sf() %>%
-#   st_transform(4326)
-#
-# lan_sf <- tbl(con, I("karta.lan_scb")) %>%
-#   collect() %>%
-#   df_till_sf() %>%
-#   st_transform(4326)
-#
-# DBI::dbDisconnect(con)                                       # stäng anslutningen
 
 server <- function(input, output, session) {
 
@@ -164,14 +150,10 @@ server <- function(input, output, session) {
   session$onFlushed(function() {
     con <- shiny_uppkoppling_las("geodata")                      # skapa anslutning
 
-    kommuner_sf <<- tbl(con, I("karta.kommun_scb")) %>%
-      collect() %>%
-      df_till_sf() %>%
+    kommuner_sf <<- st_read(con, layer = Id(schema = "karta", table = "kommun_scb")) %>%
       st_transform(4326)
 
-    lan_sf <<- tbl(con, I("karta.lan_scb")) %>%
-      collect() %>%
-      df_till_sf() %>%
+    lan_sf <<- st_read(con, layer = Id(schema = "karta", table = "lan_scb")) %>%
       st_transform(4326)
 
     DBI::dbDisconnect(con)
