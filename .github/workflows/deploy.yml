@@ -16,3 +16,8 @@ jobs:
         run: |
           TEMP_DIR="${GITHUB_WORKSPACE}/app"
           /usr/local/bin/shiny_deploy.sh karta_skapa_punktlager "$TEMP_DIR"
+
+      - name: Regenerera landningssida
+        run: |
+          sudo /usr/local/bin/generera_landningssida.sh || echo "Varning: kunde inte regenerera landningssidan (ej kritiskt fel)"
+
