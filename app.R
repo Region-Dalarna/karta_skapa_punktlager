@@ -8,6 +8,7 @@ library(sf)
 library(shinyjs)
 library(shinyWidgets)
 library(rdshinyappar)
+library(bslib)
 
 source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R", encoding = "utf-8", echo = FALSE)
 
@@ -16,37 +17,39 @@ telemetry <- skapa_telemetry("karta_skapa_punktlager")
 
 APP_BESKRIVNING <- "Rita ut och namnge punkter på en karta och exportera dem som en GIS-fil."
 
-# Hämta tillgängliga drivrutiner (endast skrivbara vektorformat)
-formats <- reactive({
-  drv <- tryCatch(sf::st_drivers(what = "vector"), error = function(e) NULL)
-  if (is.null(drv)) return(character(0))
-
-  drv <- drv[drv$write == TRUE, , drop = FALSE]
-  exclude <- c("ODS", "XLS", "SQLite", "PostGIS", "MySQL", "MSSQL", "OGR_VRT")
-  drv <- drv[!grepl(paste(exclude, collapse = "|"), drv$name, ignore.case = TRUE), , drop = FALSE]
-
-  # returnera named vector med kort namn som value och lång som name
-  out <- drv$name
-  names(out) <- drv$long_name
-  out
-})
+# Formaten som visas i filformat-väljaren (korta GDAL/OGR-drivrutinsnamn).
+FILFORMAT_VAL <- c(
+  "GeoPackage (.gpkg)"    = "GPKG",
+  "ESRI Shapefile (.zip)" = "ESRI Shapefile",
+  "GeoJSON (.geojson)"    = "GeoJSON"
+)
 
 
 ui <- fluidPage(
+  theme = bslib::bs_theme(version = 5),
   useShinyjs(),
   useSweetAlert(),
-  titlePanel("Skapa GIS-punktlager"),
+
+  # ---- Header (matchar .rd-header i regiondalarna_ruf.css) --------------
+  tags$div(
+    class = "rd-header",
+    tags$div(class = "rd-header__title", "Skapa GIS-punktlager"),
+    tags$a(
+      class  = "rd-header__right",
+      href   = "https://www.regiondalarna.se",
+      target = "_blank",
+      tags$img(src = "logo_liggande_fri_vit.png", alt = "Region Dalarna")
+    )
+  ),
+
   br(),
   h5("Vänsterklicka för att skapa och namnge punkter i kartan. Högerklicka på en punkt för att ändra dess namn eller ta bort den.",
-     style = "color:#666; font-weight: normal; margin-top:-10px;"),
+     style = "color:#666; font-weight: normal; margin-top:-10px; padding: 0 24px;"),
   tags$head(
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),         # ikon i fliken i webbläsaren
+      tags$link(rel = 'stylesheet', type = 'text/css', href = 'regiondalarna_ruf.css'),
+      tags$link(rel = 'stylesheet', type = 'text/css', href = 'app.css'),
       telemetri_ui(telemetry),
-      tags$style(HTML("
-      .leaflet-container {
-        cursor: crosshair !important;
-      }
-    ")),
 
   tags$script(HTML("
   Shiny.addCustomMessageHandler('focus_and_enter', function(message) {
@@ -89,17 +92,7 @@ ui <- fluidPage(
     }
     setTimeout(bind, 0);  // kicka igång bindningen
   });
-")),
-  tags$script(HTML("
-      document.addEventListener('shiny:connected', function() {
-        const select = document.getElementById('file_format');
-        if (!select) return;
-        for (let opt of select.options) {
-          opt.setAttribute('title', opt.text);  // Tooltip = lång beskrivning
-          opt.text = opt.value;                 // Själva texten i listan = korta namnet
-        }
-      });
-    "))
+"))
     ),
   fluidRow(
     column(
@@ -109,11 +102,12 @@ ui <- fluidPage(
     column(
       width = 3,
       textInput("gpkg_name", "Filnamn (utan ändelse):", value = "Nytt_punktlager"),
-      uiOutput("format_ui"),
-      # div(
-      #   textOutput("format_info"),
-      #   style = "color:#666; font-style:italic; margin-top:5px;"
-      # ),
+      shinyWidgets::pickerInput(
+        inputId = "file_format",
+        label   = "Filformat:",
+        choices = FILFORMAT_VAL,
+        selected = "GPKG"
+      ),
       br(),
       selectInput(
         "crs_choice", "Koordinatsystem (CRS):",
@@ -142,6 +136,16 @@ ui <- fluidPage(
       h4("Valda punkter"),
       tableOutput("pts_tbl")
     )
+  ),
+
+  # ---- Footer (matchar .rd-footer i regiondalarna_ruf.css) --------------
+  tags$div(
+    class = "rd-footer",
+    "Samhällsanalys, Region Dalarna · ",
+    tags$a(
+      href = "mailto:samhallsanalys@regiondalarna.se",
+      "samhallsanalys@regiondalarna.se"
+    )
   )
 )
 
@@ -159,43 +163,28 @@ server <- function(input, output, session) {
   # Sen laddning av lan och kommuner
   session$onFlushed(function() {
     con <- shiny_uppkoppling_las("geodata")                      # skapa anslutning
+    if (is.null(con)) {
+      showNotification(
+        "Kunde inte ansluta till geodatabasen -- kommun- och länsgränser går inte att visa just nu.",
+        type = "warning", duration = NULL
+      )
+      return(invisible())
+    }
+    on.exit(DBI::dbDisconnect(con), add = TRUE)
 
     kommuner_sf <<- st_read(con, layer = Id(schema = "karta", table = "kommun_scb")) %>%
       st_transform(4326)
 
     lan_sf <<- st_read(con, layer = Id(schema = "karta", table = "lan_scb")) %>%
       st_transform(4326)
-
-    DBI::dbDisconnect(con)
   }, once = TRUE)
 
-
-  # Hämta tillgängliga drivrutiner (endast skrivbara vektorformat)
-  available_formats <- reactive({
-    drv <- tryCatch(sf::st_drivers(what = "vector"), error = function(e) NULL)
-    if (is.null(drv)) return(character(0))
-
-    drv <- drv[drv$write == TRUE, , drop = FALSE]  # skrivbara
-    if (nrow(drv) == 0) return(character(0))
-
-    # Ta bort databaser och kontorsformat
-    exclude <- c("ODS", "XLS", "SQLite", "PostGIS", "MySQL", "MSSQL", "OGR_VRT")
-    drv <- drv[!grepl(paste(exclude, collapse = "|"), drv$name, ignore.case = TRUE), , drop = FALSE]
-
-    # sortera
-    out <- sort(unique(drv$name))
-
-    # Debug: skriv ut i R-konsolen varje gång den körs
-    cat("\navailable_formats():", paste(out, collapse = ", "), "\n")
-
-    out
-  })
 
   # --- JavaScript: fånga klick och fråga efter namn direkt i webbläsaren ---
   # --- KARTA ---
   output$map <- renderLeaflet({
     leaflet(options = leafletOptions()) |>
-      addProviderTiles(providers$CartoDB.Positron) |>
+      addProviderTiles(providers$OpenStreetMap.Mapnik) |>
       fitBounds(12.2, 60.0, 16.5, 62.3) |>
       htmlwidgets::onRender("
     function(el, x) {
@@ -286,7 +275,7 @@ server <- function(input, output, session) {
     proxy <- leafletProxy("map")
 
     # Kommungränser – tunnare linje
-    if (isTRUE(input$show_kommun)) {
+    if (isTRUE(input$show_kommun) && !is.null(kommuner_sf)) {
       proxy <- proxy %>%
         clearGroup("kommuner") %>%
         addPolygons(
@@ -302,7 +291,7 @@ server <- function(input, output, session) {
     }
 
     # Länsgränser – lite tjockare linje
-    if (isTRUE(input$show_lan)) {
+    if (isTRUE(input$show_lan) && !is.null(lan_sf)) {
       proxy <- proxy %>%
         clearGroup("lan") %>%
         addPolygons(
@@ -317,27 +306,6 @@ server <- function(input, output, session) {
       proxy <- proxy %>% clearGroup("lan")
     }
   })
-
-  output$format_ui <- renderUI({
-    drv <- tryCatch(sf::st_drivers(what = "vector"), error = function(e) NULL)
-    if (is.null(drv)) return(NULL)
-
-    drv <- drv[drv$write == TRUE, , drop = FALSE]
-    exclude <- c("ODS", "XLS", "SQLite", "PostGIS", "MySQL", "MSSQL", "OGR_VRT")
-    drv <- drv[!grepl(paste(exclude, collapse = "|"), drv$name, ignore.case = TRUE), , drop = FALSE]
-
-    drv <- drv[order(drv$long_name), ]            # sortera alfabetiskt efter long_name
-
-    shinyWidgets::pickerInput(
-      inputId = "file_format",
-      label = "Filformat:",
-      choices = setNames(drv$name, drv$long_name),  # visa LÅNGT namn i listan
-      choicesOpt = list(title = drv$name),          # visa KORT namn som tooltip
-      selected = "GPKG",
-      options = pickerOptions(title = "Välj filformat")
-    )
-  })
-
 
   # --- Ta emot punkter från JavaScript ---
   # Ny punkt från JavaScript
@@ -375,23 +343,6 @@ server <- function(input, output, session) {
     pts(cur)
     redraw_points(cur)
   })
-
-  observeEvent(input$file_format, {
-    req(input$file_format)  # kör bara när input finns
-
-    drv <- sf::st_drivers(what = "vector")
-    # Matcha både mot namn och long_name
-    match_idx <- match(input$file_format, drv$name)
-    if (is.na(match_idx)) match_idx <- match(input$file_format, drv$long_name)
-
-    short <- drv$name[match_idx]
-
-    # output$format_info <- renderText({
-    #   if (!is.na(short) && short != "") short else ""
-    # })
-  }, ignoreInit = TRUE)
-
-
 
   # --- Rensa alla ---
   observeEvent(input$clear, {
@@ -441,15 +392,11 @@ server <- function(input, output, session) {
       if (is.null(fmt) || fmt == "") fmt <- "GPKG"
       if (is.null(nm) || nm == "") nm <- "punktlager"
 
-      # formaten som ska zippas (producerar flera filer)
-      multi_file_formats <- c("ESRI Shapefile", "MapInfo File", "PCIDSK")
-
-      if (fmt %in% multi_file_formats) {
+      if (fmt == "ESRI Shapefile") {
         paste0(nm, ".zip")
       } else {
         ext <- switch(tolower(fmt),
                       "gpkg" = "gpkg",
-                      "kml" = "kml",
                       "geojson" = "geojson",
                       tolower(fmt))
         paste0(nm, ".", ext)
@@ -486,9 +433,7 @@ server <- function(input, output, session) {
 
       written_files <- list.files(tmpdir, full.names = TRUE, recursive = TRUE)
 
-      multi_file_formats <- c("ESRI Shapefile", "MapInfo File", "PCIDSK")
-
-      if (fmt %in% multi_file_formats) {
+      if (fmt == "ESRI Shapefile") {
         # flera filer → zip
         old <- setwd(tmpdir)
         zip(zipfile = file, files = list.files(".", recursive = FALSE, full.names = FALSE))

@@ -1,0 +1,10 @@
+/* ============================================================
+   app.css
+   App-specifik styling för karta_skapa_punktlager.
+   Laddas EFTER regiondalarna_ruf.css så att lokala regler
+   kan överstyra den delade identiteten vid behov.
+   ============================================================ */
+
+.leaflet-container {
+  cursor: crosshair !important;
+}
