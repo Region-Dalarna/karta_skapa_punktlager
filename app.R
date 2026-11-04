@@ -7,6 +7,14 @@ library(tibble)
 library(sf)
 library(shinyjs)
 library(shinyWidgets)
+library(rdshinyappar)
+
+source("https://raw.githubusercontent.com/Region-Dalarna/funktioner/main/func_shinyappar.R", encoding = "utf-8", echo = FALSE)
+
+# ---- Telemetri (användningsstatistik, se Adminportalen) --------------------
+telemetry <- skapa_telemetry("karta_skapa_punktlager")
+
+APP_BESKRIVNING <- "Rita ut och namnge punkter på en karta och exportera dem som en GIS-fil."
 
 # Hämta tillgängliga drivrutiner (endast skrivbara vektorformat)
 formats <- reactive({
@@ -33,6 +41,7 @@ ui <- fluidPage(
      style = "color:#666; font-weight: normal; margin-top:-10px;"),
   tags$head(
       tags$link(rel = 'icon', type = 'image/x-icon', href = 'favicon.ico'),         # ikon i fliken i webbläsaren
+      telemetri_ui(telemetry),
       tags$style(HTML("
       .leaflet-container {
         cursor: crosshair !important;
@@ -142,6 +151,7 @@ kommuner_sf <- NULL                 # ges inget värde här, utan laddas när si
 lan_sf      <- NULL
 
 server <- function(input, output, session) {
+  rdshinyappar::telemetri_server(telemetry, navigation_id = "_ingen_flik")
 
   pts <- reactiveVal(tibble(id = integer(), namn = character(), lng = numeric(), lat = numeric()))
   id_counter <- reactiveVal(0)
